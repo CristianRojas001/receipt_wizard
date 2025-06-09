@@ -18,7 +18,10 @@ if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
   );
   process.exit(1);
 }
-const client = new vision.ImageAnnotatorClient();
+const client = new vision.ImageAnnotatorClient({
+  credentials: JSON.parse(process.env.GOOGLE_CLOUD_CREDENTIALS),
+});
+
 
 // ────────────────────────────────────────────────────────────────────────────────
 // 2) MULTER CONFIGURATION (accept a form-field named “receipt”)
