@@ -12,12 +12,11 @@ const PORT = process.env.PORT || 3000;
 // ────────────────────────────────────────────────────────────────────────────────
 // 1) GOOGLE VISION SETUP
 // ────────────────────────────────────────────────────────────────────────────────
-if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-  console.error(
-    "❌ Please set GOOGLE_APPLICATION_CREDENTIALS to your Vision key JSON."
-  );
+if (!process.env.GOOGLE_CLOUD_CREDENTIALS) {
+  console.error("❌ GOOGLE_CLOUD_CREDENTIALS env var not set");
   process.exit(1);
 }
+
 const client = new vision.ImageAnnotatorClient({
   credentials: JSON.parse(process.env.GOOGLE_CLOUD_CREDENTIALS),
 });
