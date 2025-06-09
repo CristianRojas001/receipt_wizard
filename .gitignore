@@ -1,0 +1,28 @@
+
+
+# Environment secrets
+.env
+
+# Credential or API key files
+*.json
+
+# Uploads from OCR
+uploads/
+
+# Log files from OCR errors or server
+logs/
+
+node_modules/
+
+google-credentials.json
+slack token.txt
+node_modules/
+.env
+
+
+
+# OS trash
+Thumbs.db
+.DS_Store
+"slack token.txt" 
+"google-credentials.json" 
