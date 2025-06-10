@@ -28,7 +28,7 @@ try {
 const client = new vision.ImageAnnotatorClient({ credentials });
 
 // ────────────────────────────────────────────────────────────────────────────────
-// 2) MULTER CONFIGURATION (accepts field "receipt"), WITH LIMITS
+// 2) MULTER CONFIGURATION (accepts field "receipt")
 // ────────────────────────────────────────────────────────────────────────────────
 const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -52,7 +52,6 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({
   storage,
-  limits: { fileSize: 2 * 1024 * 1024 },  // 2 MB max
   fileFilter,
 });
 
