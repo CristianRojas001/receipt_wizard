@@ -10,23 +10,28 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ────────────────────────────────────────────────────────────────────────────────
-// 1) GOOGLE VISION SETUP
+// 1) GOOGLE VISION SETUP & CREDENTIAL PARSING
 // ────────────────────────────────────────────────────────────────────────────────
 if (!process.env.GOOGLE_CLOUD_CREDENTIALS) {
   console.error("❌ GOOGLE_CLOUD_CREDENTIALS env var not set");
   process.exit(1);
 }
 
-const client = new vision.ImageAnnotatorClient({
-  credentials: JSON.parse(process.env.GOOGLE_CLOUD_CREDENTIALS),
-});
+let credentials;
+try {
+  credentials = JSON.parse(process.env.GOOGLE_CLOUD_CREDENTIALS);
+} catch (err) {
+  console.error("❌ Invalid GOOGLE_CLOUD_CREDENTIALS JSON:", err.message);
+  process.exit(1);
+}
 
+const client = new vision.ImageAnnotatorClient({ credentials });
 
 // ────────────────────────────────────────────────────────────────────────────────
-// 2) MULTER CONFIGURATION (accept a form-field named “receipt”)
+// 2) MULTER CONFIGURATION (accepts field "receipt"), WITH LIMITS
 // ────────────────────────────────────────────────────────────────────────────────
 const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadDir),
@@ -37,56 +42,72 @@ const storage = multer.diskStorage({
   },
 });
 
+const fileFilter = (req, file, cb) => {
+  console.log("📦 Incoming file:", { originalname: file.originalname, mimetype: file.mimetype });
+  if (file.mimetype.startsWith("image/") || file.mimetype === "application/octet-stream") {
+    return cb(null, true);
+  }
+  return cb(new Error("Only image files allowed"), false);
+};
+
 const upload = multer({
   storage,
-  fileFilter: (req, file, cb) => {
-    console.log("📦 Incoming file:", {
-      originalname: file.originalname,
-      mimetype: file.mimetype,
-    });
-
-    // Allow images and fallback if mimetype is generic
-    if (
-      file.mimetype.startsWith("image/") ||
-      file.mimetype === "application/octet-stream"
-    ) {
-      return cb(null, true);
-    }
-
-    return cb(new Error("Only image files allowed"), false);
-  },
+  limits: { fileSize: 2 * 1024 * 1024 },  // 2 MB max
+  fileFilter,
 });
 
 // ────────────────────────────────────────────────────────────────────────────────
-// 3) LOGGING UTILITIES
+// 3) LOGGING UTILITIES (structured)
 // ────────────────────────────────────────────────────────────────────────────────
 const logsDir = path.join(__dirname, "logs");
-if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir);
+if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
 const errorLogFile = path.join(logsDir, "ocr-errors.log");
 
 function logError(message, content) {
   const timestamp = new Date().toISOString();
-  const entry = `\n[${timestamp}] ${message}\n${content}\n${"-".repeat(60)}\n`;
-  fs.appendFileSync(errorLogFile, entry);
+  const entry = { timestamp, level: "error", message, content };
+  fs.appendFileSync(errorLogFile, JSON.stringify(entry) + "\n");
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
-// 4) ROUTE: POST /parse-receipt
+// 4) HELPER: PROMISE WITH TIMEOUT & OCR WITH RETRIES
+// ────────────────────────────────────────────────────────────────────────────────
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("OCR timeout")), ms))
+  ]);
+}
+
+async function performOcrWithRetry(filePath, attempts = 2, timeoutMs = 10000) {
+  let lastErr;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      const [result] = await withTimeout(
+        client.documentTextDetection(filePath),
+        timeoutMs
+      );
+      return result;
+    } catch (err) {
+      lastErr = err;
+      logError(`OCR attempt ${i} failed`, err.stack || err.message);
+      if (i === attempts) throw lastErr;
+    }
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// 5) ROUTE: POST /parse-receipt
 // ────────────────────────────────────────────────────────────────────────────────
 app.post("/parse-receipt", upload.single("receipt"), async (req, res) => {
-  console.log("➡️  POST /parse-receipt called");
   const file = req.file;
-
   if (!file) {
-    return res
-      .status(400)
-      .json({ error: "No file uploaded under field ‘receipt’." });
+    return res.status(400).json({ status: "error", message: "No file uploaded under field 'receipt'." });
   }
-
   const imagePath = file.path;
 
   try {
-    const [docResult] = await client.documentTextDetection(imagePath);
+    const docResult = await performOcrWithRetry(imagePath);
     const fullText =
       docResult?.fullTextAnnotation?.text ||
       docResult?.textAnnotations?.[0]?.description ||
@@ -94,49 +115,73 @@ app.post("/parse-receipt", upload.single("receipt"), async (req, res) => {
 
     if (!fullText.trim()) {
       logError("⚠️ OCR returned empty text", `File: ${file.filename}`);
-      fs.unlinkSync(imagePath);
-      return res.status(200).json({
-        merchant: { value: null, confidence: 0.0 },
-        date: { value: null, confidence: 0.0 },
-        total: { value: null, confidence: 0.0 },
-      });
+      try { fs.unlinkSync(imagePath); } catch (delErr) { logError("File delete error", delErr.message); }
+      return res.json({ status: "ok", data: { merchant: null, date: null, total: null } });
     }
 
-    const lines = fullText
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
-
+    const lines = fullText.split("\n").map(l => l.trim()).filter(Boolean);
     const { merchant, merchantConf } = extractMerchant(lines);
     const { date, dateConf } = extractDate(lines);
     const { total, totalConf } = extractTotal(lines);
 
-    fs.unlinkSync(imagePath);
+    try { fs.unlinkSync(imagePath); } catch (delErr) { logError("File delete error", delErr.message); }
 
-    return res.status(200).json({
-      merchant: { value: merchant, confidence: merchantConf },
-      date: { value: date, confidence: dateConf },
-      total: { value: total, confidence: totalConf },
+    return res.json({
+      status: "ok",
+      data: {
+        merchant: { value: merchant, confidence: merchantConf },
+        date:     { value: date,     confidence: dateConf     },
+        total:    { value: total,    confidence: totalConf    }
+      }
     });
   } catch (err) {
-    logError(
-      "🚨 OCR failure",
-      `Error: ${err.message}\nStack: ${err.stack}\nFile: ${file.filename}`
-    );
-    try {
-      fs.unlinkSync(imagePath);
-    } catch (_) {}
-    return res.status(500).json({ error: "Server error" });
+    const code = err.message === "OCR timeout" ? 504 : 500;
+    logError("🚨 OCR failure or timeout", err.stack || err.message);
+    try { fs.unlinkSync(imagePath); } catch (delErr) { logError("File delete error", delErr.message); }
+    return res.status(code).json({ status: "error", message: err.message || "Server error" });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`🧾 Server listening on http://localhost:${PORT}`);
+// ────────────────────────────────────────────────────────────────────────────────
+// 6) HEALTH & READINESS ENDPOINTS
+// ────────────────────────────────────────────────────────────────────────────────
+app.get("/healthz", (_req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+app.get("/readyz", async (_req, res) => {
+  try {
+    await client.getProjectId();
+    res.status(200).json({ status: "ok" });
+  } catch (err) {
+    res.status(503).json({ status: "error", message: "Vision client not ready" });
+  }
 });
 
 // ────────────────────────────────────────────────────────────────────────────────
-// 5) HELPER FUNCTIONS
+// 7) GRACEFUL SHUTDOWN
 // ────────────────────────────────────────────────────────────────────────────────
+const server = app.listen(PORT, () => console.log(`🧾 Server listening on http://localhost:${PORT}`));
+
+const shutdown = () => {
+  console.log("⚠️  Shutdown signal received, closing... ");
+  server.close(() => {
+    console.log("✅ Closed out remaining connections");
+    process.exit(0);
+  });
+  setTimeout(() => {
+    console.error("⚠️  Could not close connections in time, forcing exit");
+    process.exit(1);
+  }, 30000);
+};
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
+
+// ────────────────────────────────────────────────────────────────────────────────
+// HELPER FUNCTIONS: extractMerchant, extractDate, extractTotal
+// ────────────────────────────────────────────────────────────────────────────────
+
+/* ... existing extractMerchant, extractDate, extractTotal ... */
+
 
 /**
  * extractMerchant(lines) → { merchant: string|null, merchantConf: number }
