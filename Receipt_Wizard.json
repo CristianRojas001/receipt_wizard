@@ -1,0 +1,1006 @@
+{
+  "name": "Receipt Wizard",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {
+          "download": true,
+          "imageSize": "large"
+        }
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1280,
+        -340
+      ],
+      "id": "b260dd63-1644-42d6-bbbf-d4b320cf9fdf",
+      "name": "TG_Trigger",
+      "webhookId": "2e589589-3806-488e-b9ab-bfdc7b938b4f",
+      "credentials": {
+        "telegramApi": {
+          "id": "o4qu57y6RsSIPtby",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "38d63a09-8d49-41bf-a204-1b754d711430",
+              "leftValue": "={{ $binary?.data?.mimeType?.startsWith(\"image/\") === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "d6a07cf4-d5f4-4e8a-9ca0-7698b3611519",
+              "leftValue": "={{ $json.message?.text?.toLowerCase()?.includes(\"flag\") }}\n\n",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1060,
+        -340
+      ],
+      "id": "3ec889ff-e77e-43a9-a207-a351f923451e",
+      "name": "IF_IsImageOrFlag"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.message.chat.id }}",
+        "text": "⚠️ Sorry, only image receipts are supported. Please send a photo.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -840,
+        -140
+      ],
+      "id": "32a37458-3e5f-4d49-8801-0271718996f7",
+      "name": "TG_RejectNonImage",
+      "webhookId": "f75bec9a-0222-4d23-81c8-955d12041881",
+      "credentials": {
+        "telegramApi": {
+          "id": "o4qu57y6RsSIPtby",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// grab & normalize the incoming text\nconst text = $input.first().json.message?.text?.trim().toLowerCase() || \"\";\n\n// check for the substring \"flag\"\nconst isFlag = text.includes(\"flag\");\n\n// emit the original JSON plus your new flag\nreturn [\n  {\n    json: {\n      ...$json,\n      isFlag,\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -840,
+        -440
+      ],
+      "id": "2d5180f3-1830-42f4-9356-cde87312332e",
+      "name": "JS_FlagDetect"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3fe35031-4f14-4233-af13-a21c27deabba",
+              "leftValue": "={{ $json.isFlag }}\n",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -620,
+        -440
+      ],
+      "id": "d2224564-e1dc-42fc-be03-21f036d28bf7",
+      "name": "IF_UserFlagged"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH last_receipt AS (\n  SELECT id FROM parsed_receipts\n  WHERE telegram_id = '{{$('TG_Trigger').item.json.message.chat.id }}'\n  ORDER BY created_at DESC\n  LIMIT 1\n)\nUPDATE parsed_receipts\nSET flagged = true\nWHERE id IN (SELECT id FROM last_receipt);\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -400,
+        -640
+      ],
+      "id": "8d79a36b-6dd9-46f6-a83c-67cfae1363e9",
+      "name": "DB_FlagLast",
+      "credentials": {
+        "postgres": {
+          "id": "deJmNJ1MxMqkivQ4",
+          "name": "Postgres account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('TG_Trigger').item.json.message.from.id }}",
+        "text": "=Got it! {{ $('TG_Trigger').item.json.message.from.first_name }} I’ve marked this receipt for review. Someone will take a look.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -180,
+        -640
+      ],
+      "id": "cbb7b032-43ee-4de2-8c84-c809de034aed",
+      "name": "TG_NotifyFlagged",
+      "webhookId": "f75bec9a-0222-4d23-81c8-955d12041881",
+      "credentials": {
+        "telegramApi": {
+          "id": "o4qu57y6RsSIPtby",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $json.message.photo[2].file_id }}"
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -400,
+        -340
+      ],
+      "id": "c2979212-44c5-4194-ad75-8c1b70294455",
+      "name": "TG_DownloadFull",
+      "webhookId": "82205cb7-6c10-4c4f-bfa0-8df5ab61f07a",
+      "credentials": {
+        "telegramApi": {
+          "id": "o4qu57y6RsSIPtby",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://receipt-wizard.onrender.com/parse-receipt",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "receipt",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -180,
+        -340
+      ],
+      "id": "94c09b1e-6ed1-428f-89b1-24be6675ee40",
+      "name": "OCR_SendToAPI",
+      "retryOnFail": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "26a36192-983e-4983-b437-e0a3760990b3",
+              "leftValue": "={{  $json.body.data.total.value !== null }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "45f15d20-5c10-4b63-bef9-76b474e9be35",
+              "leftValue": "={{ $json.body.data.total.value !== \"0.00\" }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        40,
+        -340
+      ],
+      "id": "cfda9cd6-3478-45af-aa7e-973b63454dc3",
+      "name": "IF_HasTotal"
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $('TG_Trigger').item.json.message.photo[2].file_id }}",
+        "download": "={{ true }}"
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        -440
+      ],
+      "id": "36edf9de-937e-43c6-88ac-fe626d3f7847",
+      "name": "TG_DownloadForSave",
+      "webhookId": "82205cb7-6c10-4c4f-bfa0-8df5ab61f07a",
+      "credentials": {
+        "telegramApi": {
+          "id": "o4qu57y6RsSIPtby",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "={{ $json.result.file_unique_id }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "root",
+          "cachedResultName": "/ (Root folder)"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        480,
+        -440
+      ],
+      "id": "c3083759-a57c-46be-8e26-ea789c311631",
+      "name": "GD_UploadReceipt",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YGB6K1f0itEvUMqp",
+          "name": "Google Drive account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "parsed_receipts",
+          "mode": "list",
+          "cachedResultName": "parsed_receipts"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "merchant": "={{ $('OCR_SendToAPI').item.json.body.data.merchant.value }}\n",
+            "purchase_date": "={{ $('OCR_SendToAPI').item.json.body.data.date.value }}",
+            "date_confidence": "={{ $('OCR_SendToAPI').item.json.body.data.date.confidence }}",
+            "total_confidence": "={{ $('OCR_SendToAPI').item.json.body.data.total.confidence }}",
+            "image_path": "={{$node[\"GD_UploadReceipt\"].json.webContentLink }}",
+            "merchant_confidence": "={{ $('OCR_SendToAPI').item.json.body.data.merchant.confidence }}",
+            "total_amount": "={{ parseFloat(\n     $('OCR_SendToAPI').item.json.body.data.total.value.replace(\",\", \".\")\n) }}\n",
+            "telegram_id": "={{ $('TG_Trigger').item.json.message.from.id }}",
+            "sender_name": "={{ $('TG_Trigger').item.json.message.from.first_name }}",
+            "flagged": false
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "merchant",
+              "displayName": "merchant",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "merchant_confidence",
+              "displayName": "merchant_confidence",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "purchase_date",
+              "displayName": "purchase_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "date_confidence",
+              "displayName": "date_confidence",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "total_amount",
+              "displayName": "total_amount",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "total_confidence",
+              "displayName": "total_confidence",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "image_path",
+              "displayName": "image_path",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "telegram_id",
+              "displayName": "telegram_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sender_name",
+              "displayName": "sender_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "flagged",
+              "displayName": "flagged",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        700,
+        -440
+      ],
+      "id": "76e774ef-1dde-45e6-86b0-85008831ae25",
+      "name": "DB_InsertReceipt",
+      "credentials": {
+        "postgres": {
+          "id": "deJmNJ1MxMqkivQ4",
+          "name": "Postgres account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('TG_Trigger').item.json.message.chat.id }}",
+        "text": "=🧾 Receipt saved!\n\n📍 Merchant: {{ $json.merchant }}\n📅 Date: {{ $('OCR_SendToAPI').item.json.body.date.value }}\n\n💰 Total: {{ $json.total_amount }} €\n\n💾 Image stored successfully \nIf any value looks wrong, please reply \"Flag\" and we’ll take a look.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        920,
+        -440
+      ],
+      "id": "148b51d2-9e38-404b-bbbc-56d6483f755f",
+      "name": "TG_ConfirmSave",
+      "webhookId": "f75bec9a-0222-4d23-81c8-955d12041881",
+      "credentials": {
+        "telegramApi": {
+          "id": "o4qu57y6RsSIPtby",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('IF_UserFlagged').item.json.message.chat.id }}",
+        "text": "🧐 Couldn't detect a total price on that receipt. \n\nPlease double-check the image or send a clearer one. \nIf it's a long receipt, try cropping just the relevant part. \nYou can also reply with \"flag\" to mark this for review.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        -240
+      ],
+      "id": "1cea9628-b7dd-4dab-8360-4294ecf67130",
+      "name": "TG_NotifyNoPrice",
+      "webhookId": "f75bec9a-0222-4d23-81c8-955d12041881",
+      "credentials": {
+        "telegramApi": {
+          "id": "o4qu57y6RsSIPtby",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1280,
+        120
+      ],
+      "id": "86c505a9-76f5-40e6-b8d1-e9c43f3986e5",
+      "name": "IF_Error"
+    },
+    {
+      "parameters": {
+        "chatId": "7079518319",
+        "text": "=Error Trigger in Workflow\n\nWorkflow: {{ $json.workflow.name }}.\nError: {{ $json.execution.error.message }}.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -1060,
+        120
+      ],
+      "id": "93c80a00-48f4-481f-b91b-bebe00a7fb20",
+      "name": "TG_NotifyError",
+      "webhookId": "f75bec9a-0222-4d23-81c8-955d12041881",
+      "credentials": {
+        "telegramApi": {
+          "id": "o4qu57y6RsSIPtby",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * LOG_Build_Flagged\n * Runs when user “flag”s a receipt and we notify them.\n */\n\n // 1) Core context\nconst timestamp       = new Date().toISOString();\n\nconst workflowName    = $workflow.name;\nconst chatId          = $node[\"TG_Trigger\"].json.message.chat.id;\nconst firstName       = $node[\"TG_Trigger\"].json.message.from.first_name;\n\n// 2) Which receipt got flagged\n// We flagged the latest in DB; grab its ID\nconst flaggedRecord   = $node[\"DB_FlagLast\"].json;  \nconst dbRecordId      = flaggedRecord.id ?? \"N/A\";\n\n// 3) Flags & Branch info\nconst isUserFlag      = $node[\"JS_FlagDetect\"].json.isFlag ? \"true\" : \"false\";\nconst pathTaken       = \"Flagged\";\n\n// 4) Build the line\nlet logLine = [\n  `[${timestamp}]`,\n \n  `wkflow=${workflowName}`,\n  `user=${chatId}`,\n  `name=${firstName}`,\n  `step=NotifyFlagged`,\n  `path=${pathTaken}`,\n  `userFlag=${isUserFlag}`,\n  `dbId=${dbRecordId}`\n].join(\" \");\n\n// 5) Escape ampersands\nlogLine = logLine.replace(/&/g, \"^&\");\n\n// 6) Expose\nitems[0].json.logLine = logLine;\nreturn items;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        40,
+        -640
+      ],
+      "id": "a936eed0-936d-4286-8d8a-d1a16b4b903f",
+      "name": "LOG_Build_Flagged"
+    },
+    {
+      "parameters": {
+        "command": "=cmd.exe /c echo {{ $json.logLine }} >> \"D:\\IT workspace\\receipt-Wizard\\logs\\receipt_workflow.log\"\n\n\n"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        260,
+        -640
+      ],
+      "id": "c91c3b7d-2e7a-463a-8f6f-50bc14b8ab59",
+      "name": "LOG_Append_Flagged",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * LOG_Build_NoPrice\n * Runs when OCR couldn’t detect a total.\n */\n\n// 1) Metadata\nconst timestamp    = new Date().toISOString();\n\nconst workflowName = $workflow.name;\nconst chatId       = $node[\"TG_Trigger\"].json.message.chat.id;\nconst firstName    = $node[\"TG_Trigger\"].json.message.from.first_name;\n\n// 2) Parsed OCR values\nconst ocrNode      = $node[\"OCR_SendToAPI\"].json.body || {};\nconst merchant     = ocrNode.merchant?.value     ?? \"N/A\";\nconst mconf        = ocrNode.merchant?.confidence ?? \"N/A\";\nconst date         = ocrNode.date?.value         ?? \"N/A\";\nconst dconf        = ocrNode.date?.confidence    ?? \"N/A\";\nconst total        = ocrNode.total?.value        ?? \"N/A\";\nconst tconf        = ocrNode.total?.confidence   ?? \"N/A\";\n\n// 3) Branch info\nconst pathTaken    = \"NoPrice\";\n\n// 4) Build a single‐line log (no inner quotes, escape &)\nlet logLine = [\n  `[${timestamp}]`,\n\n  `wkflow=${workflowName}`,\n  `user=${chatId}`,\n  `name=${firstName}`,\n  `step=NotifyNoPrice`,\n  `path=${pathTaken}`,\n  `merchant=${merchant}`,\n  `mconf=${mconf}`,\n  `date=${date}`,\n  `dconf=${dconf}`,\n  `total=${total}`,\n  `tconf=${tconf}`\n].join(\" \");\n\nlogLine = logLine.replace(/&/g, \"^&\");\nitems[0].json.logLine = logLine;\nreturn items;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        -240
+      ],
+      "id": "45a66c05-5c68-4ede-8947-5efc350aac02",
+      "name": "LOG_Build_NoPrice"
+    },
+    {
+      "parameters": {
+        "command": "=cmd.exe /c echo {{ $json.logLine }} >> \"D:\\IT workspace\\receipt-Wizard\\logs\\receipt_workflow.log\"\n\n\n"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        700,
+        -240
+      ],
+      "id": "50c9ced4-0f5d-4990-8fc8-91e854ecb7aa",
+      "name": "LOG_Append_NoPrice",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * LOG_Build_Final\n * (This runs after TG_ConfirmSave, on the “Price Found” branch)\n */\n\n// 1) Core receipt data\nconst timestamp       = new Date().toISOString();\nconst chatId          = $node[\"TG_Trigger\"].json.message.chat.id;\nconst firstName       = $node[\"TG_Trigger\"].json.message.from.first_name;\nconst merchant        = $node[\"DB_InsertReceipt\"].json.merchant;\nconst merchantConf    = $node[\"DB_InsertReceipt\"].json.merchant_confidence;\nconst purchaseDate    = $node[\"DB_InsertReceipt\"].json.purchase_date;\nconst dateConf        = $node[\"DB_InsertReceipt\"].json.date_confidence;\nconst total           = $node[\"DB_InsertReceipt\"].json.total_amount;\nconst totalConf       = $node[\"DB_InsertReceipt\"].json.total_confidence;\n\n// 2) Flags & branching\nconst hasTotal        = Boolean(total) ? \"true\" : \"false\";\nconst isFlaggedByUser = $node[\"JS_FlagDetect\"].json.isFlag ? \"true\" : \"false\";\nconst isDuplicate     = $node[\"DB_InsertReceipt\"].json.duplicate ?? \"false\";  // if you added that column\n\n// 3) File metadata (from your download node)\nconst fileUniqueId    = $node[\"TG_DownloadFull\"].json.file_unique_id;\nconst mimeType        = $node[\"TG_DownloadForSave\"].binary.data.mimeType;\nconst fileSize        = $node[\"TG_DownloadForSave\"].binary.data.fileSize;\n\n// 4) OCR & HTTP details\nconst ocrStatusCode   = $node[\"OCR_SendToAPI\"].json.response?.statusCode || \"N/A\";\n\n// 5) Drive & DB details\nconst driveUrl        = $node[\"GD_UploadReceipt\"].json.webContentLink;\nconst dbRecordId      = $node[\"DB_InsertReceipt\"].json.id;\n\n// 6) Workflow metadata\nconst workflowName    = $workflow.name;            // your n8n workflow name\n\n\n// 7) Build the audit line (no inner quotes, escape & if needed)\nlet logLine = [\n  `[${timestamp}]`,\n  \n  `wkflow=${workflowName}`,\n  `user=${chatId}`,\n  `name=${firstName}`,\n  `step=ConfirmSave`,\n  `merchant=${merchant}`,\n  `mconf=${merchantConf}`,\n  `date=${purchaseDate}`,\n  `dconf=${dateConf}`,\n  `total=${total}`,\n  `tconf=${totalConf}`,\n  `hasTotal=${hasTotal}`,\n  `userFlag=${isFlaggedByUser}`,\n  `dup=${isDuplicate}`,\n  `fileId=${fileUniqueId}`,\n  `mime=${mimeType}`,\n  `size=${fileSize}`,\n  `ocrCode=${ocrStatusCode}`,\n  `driveUrl=${driveUrl}`,\n  `dbId=${dbRecordId}`\n].join(\" \");\n\n// escape any stray ampersands so that cmd.exe >> won't break\nlogLine = logLine.replace(/&/g, \"^&\");\n\n// expose it\nitems[0].json.logLine = logLine;\nreturn items;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        -440
+      ],
+      "id": "5b26c07c-cf0e-431d-bb47-8899b9f80f63",
+      "name": "LOG_Build_Confirmed"
+    },
+    {
+      "parameters": {
+        "command": "=cmd.exe /c echo {{ $json.logLine }} >> \"D:\\IT workspace\\receipt-Wizard\\logs\\receipt_workflow.log\"\n\n\n\n"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1360,
+        -440
+      ],
+      "id": "0772754d-fdce-4fc1-96a1-ee2deb5c79ad",
+      "name": "LOG_Append_Confirmed",
+      "notesInFlow": true,
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * LOG_Build_RejectNonImage\n * Runs when a non-image (and non-“flag”) message arrives.\n */\n\n// 1) Meta\nconst timestamp    = new Date().toISOString();\n\nconst workflowName = $workflow.name;\nconst chatId       = $node[\"TG_Trigger\"].json.message.chat.id;\nconst firstName    = $node[\"TG_Trigger\"].json.message.from.first_name;\n\n// 2) Input details\nconst inputText    = $node[\"TG_Trigger\"].json.message.text || '<no-text>';\nconst hasPhoto     = Array.isArray($node[\"TG_Trigger\"].json.message.photo);\nconst mimeType     = hasPhoto\n  ? $node[\"TG_Trigger\"].json.message.photo[0].mime_type || 'image/unknown'\n  : ($node[\"TG_Trigger\"].json.message.document?.mime_type || 'none');\n\n// 3) Build line (no inner quotes, escape &)\nlet logLine = [\n  `[${timestamp}]`,\n\n  `wkflow=${workflowName}`,\n  `user=${chatId}`,\n  `name=${firstName}`,\n  `step=RejectNonImage`,\n  `path=InvalidInput`,\n  `text=${inputText}`,\n  `mime=${mimeType}`\n].join(\" \");\n\nlogLine = logLine.replace(/&/g, '^&');\nitems[0].json.logLine = logLine;\nreturn items;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -620,
+        -140
+      ],
+      "id": "255ea149-206c-4c05-8b58-c5666df6c9a7",
+      "name": "LOG_Build_RejectNonImage"
+    },
+    {
+      "parameters": {
+        "command": "=cmd.exe /c echo {{ $json.logLine }} >> \"D:\\IT workspace\\receipt-Wizard\\logs\\receipt_workflow.log\"\n\n\n"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        -140
+      ],
+      "id": "33eb0b22-3b27-4d9b-90a8-2311274a2fc8",
+      "name": "LOG_Append_RejectNonImage",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "command": "=cmd.exe /c echo {{ $json.logLine }} >> \"D:\\IT workspace\\receipt-Wizard\\logs\\receipt_workflow.log\"\n\n\n"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -620,
+        120
+      ],
+      "id": "6c159f2c-0565-4f7e-b964-550eef005bf6",
+      "name": "LOG_Append_RejectNonImage1",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * LOG_Build_Error\n * Runs after TG_NotifyError, using data from IF_Error\n */\n\n// 1) Timestamps & run info\nconst timestamp    = new Date().toISOString();\n\n\n// 2) Workflow info from IF_Error\nconst workflowName = $node[\"IF_Error\"].json.workflow?.name    || \"UnknownWF\";\nconst execInfo     = $node[\"IF_Error\"].json.execution || {};\nconst errorMsgRaw  = execInfo.error?.message                || \"<no message>\";\nconst failedNode   = execInfo.lastNodeExecuted               || \"UnknownNode\";\n\n// 3) User info from original trigger (still in context)\n\nconst firstName    = $input.first().json.result.chat.first_name;\n\n// 4) Clean up the error message\nlet errorMsg = errorMsgRaw\n  .replace(/[\\r\\n]+/g, ' ')    // remove newlines\n  .replace(/\"/g, '')           // strip quotes\n  .slice(0, 200);              // cap length\n\n// 5) Build the log line (no inner quotes, escape &)\nlet logLine = [\n  `[${timestamp}]`,\n \n  `wkflow=${workflowName}`,\n  `step=NotifyError`,\n\n  `name=${firstName}`,\n  `failedNode=${failedNode}`,\n  `error=${errorMsg}`\n].join(\" \");\n\n// 6) Escape ampersands for cmd.exe\nlogLine = logLine.replace(/&/g, '^&');\n\n// 7) Expose to next node\nitems[0].json.logLine = logLine;\nreturn items;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -840,
+        120
+      ],
+      "id": "f18ae776-0310-44d0-bd19-01801907ce1e",
+      "name": "LOG_Build_Error"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "TG_Trigger": {
+      "main": [
+        [
+          {
+            "node": "IF_IsImageOrFlag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF_IsImageOrFlag": {
+      "main": [
+        [
+          {
+            "node": "JS_FlagDetect",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TG_RejectNonImage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JS_FlagDetect": {
+      "main": [
+        [
+          {
+            "node": "IF_UserFlagged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF_UserFlagged": {
+      "main": [
+        [
+          {
+            "node": "DB_FlagLast",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TG_DownloadFull",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB_FlagLast": {
+      "main": [
+        [
+          {
+            "node": "TG_NotifyFlagged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG_NotifyFlagged": {
+      "main": [
+        [
+          {
+            "node": "LOG_Build_Flagged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG_DownloadFull": {
+      "main": [
+        [
+          {
+            "node": "OCR_SendToAPI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OCR_SendToAPI": {
+      "main": [
+        [
+          {
+            "node": "IF_HasTotal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF_HasTotal": {
+      "main": [
+        [
+          {
+            "node": "TG_DownloadForSave",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TG_NotifyNoPrice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG_DownloadForSave": {
+      "main": [
+        [
+          {
+            "node": "GD_UploadReceipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GD_UploadReceipt": {
+      "main": [
+        [
+          {
+            "node": "DB_InsertReceipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB_InsertReceipt": {
+      "main": [
+        [
+          {
+            "node": "TG_ConfirmSave",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG_ConfirmSave": {
+      "main": [
+        [
+          {
+            "node": "LOG_Build_Confirmed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF_Error": {
+      "main": [
+        [
+          {
+            "node": "TG_NotifyError",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOG_Build_Flagged": {
+      "main": [
+        [
+          {
+            "node": "LOG_Append_Flagged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG_NotifyNoPrice": {
+      "main": [
+        [
+          {
+            "node": "LOG_Build_NoPrice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOG_Build_NoPrice": {
+      "main": [
+        [
+          {
+            "node": "LOG_Append_NoPrice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG_RejectNonImage": {
+      "main": [
+        [
+          {
+            "node": "LOG_Build_RejectNonImage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOG_Build_Confirmed": {
+      "main": [
+        [
+          {
+            "node": "LOG_Append_Confirmed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOG_Build_RejectNonImage": {
+      "main": [
+        [
+          {
+            "node": "LOG_Append_RejectNonImage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG_NotifyError": {
+      "main": [
+        [
+          {
+            "node": "LOG_Build_Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOG_Build_Error": {
+      "main": [
+        [
+          {
+            "node": "LOG_Append_RejectNonImage1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveExecutionProgress": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "a7327f37-74e2-404f-b1a8-c35dda13be69",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "6552087cf0b11b57fb371fc42d904baceb47323a60869dea3c766dca388ef8e2"
+  },
+  "id": "LRltnl1JSwqJU5vJ",
+  "tags": []
+}
